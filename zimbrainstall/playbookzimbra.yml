@@ -1,0 +1,54 @@
+---
+- name: Automatizar Instalación Zimbra
+  hosts: 127.0.0.1
+  become: true
+  
+  tasks:
+    - name: Cambiar hostname
+      ansible.builtin.hostname:
+        name: "{{ hostname }}"
+    - name: Instalar paquetes o software requeridos
+      apt:
+        state: present 
+        update_cache: yes
+        name:
+          - netcat-openbsd
+          - perl
+          - unzip
+          - lsb-release
+          - dnsmasq
+          - net-tools
+          - dnsutils
+          - iptables
+          - sed
+          - wget
+          - rsyslog    
+    - name: Instalar y configurar DNS interno
+      script: /home/ubuntu/zimbrainstall/scriptdns.sh
+      become: yes
+      environment:
+        DOMAIN: "{{ dominio }}"
+      register: console
+    - debug: msg="{{ console.stdout }}"
+    - debug: msg="{{ console.stderr }}" 
+    - name: Copiar instalador y asignar permisos al pem de conexion
+      command: "{{ item }} chdir=/home/ubuntu"
+      with_items:
+        - chmod 400 '{{ pem }}'
+        - scp -o StrictHostKeyChecking=no -i '{{ pem }}' ubuntu@'{{ ipinstancetemporal }}':'/home/ubuntu/*.tgz' /home/ubuntu/
+    - name: Busca el instador a descomprimir y lo captura en la variable find_result
+      find: paths="/home/ubuntu/" patterns="zcs*.tgz"
+      register: find_result
+    - name: Descomprime el istalador
+      unarchive: src="{{ item.path }}" dest="/home/ubuntu/"
+      with_items: "{{ find_result.files }}"
+    - name: Instala Zimbra
+      shell: cd /home/ubuntu/zcs*/ && sudo ./install.sh -s < /home/ubuntu/zimbrainstall/zimbra-keys
+    - name: Copiar template de configuracion Zimbra
+      template:
+        src: /home/ubuntu/zimbrainstall/template-config.j2
+        dest: /home/ubuntu/zimbra-config
+    - name: Configura Zimbra
+      script: /home/ubuntu/zimbrainstall/scriptconfigzimbra.sh
+      become: yes
+ 

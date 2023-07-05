@@ -1,0 +1,82 @@
+---
+- name: Automatizar compilacion Zimbra
+  hosts: 127.0.0.1
+  become: true
+
+  tasks:
+    - name: Instalar paquetes o software requerido para la actividad de compilacion
+      apt:
+        state: present 
+        update_cache: yes
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3-pip
+
+    - name: Crear carpeta keyrings
+      command: "{{ item }} chdir=/home/ubuntu"
+      with_items:
+        - sudo mkdir -p /etc/apt/keyrings
+    - name: llave de repositorio de docker ubuntu
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+    - name: repositorio de docker ubuntu
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu focal stable
+        state: present
+
+    - name: Actualiza el sistema operativo
+      command: "{{ item }} chdir=/home/ubuntu"
+      with_items:
+        - sudo apt-get update -y
+
+    - name: Instalar paquetes o software requeridos para el proceso de compilacion
+      apt:
+        state: present 
+        update_cache: yes
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+    - name: Instala el modulo de docker para python
+      pip:
+        name: docker      
+    - name: Inicia el servicio de docker
+      ansible.builtin.service:
+        name: docker
+        state: started 
+    - name: Agrega al grupo de docker al usuario root
+      command: "{{ item }} chdir=/home/ubuntu"
+      with_items:
+        - sudo usermod -aG docker root             
+    - name: Construye la imagen del contenedor
+      community.docker.docker_image:
+        name: zimbrabuild
+        source: build
+        build:
+          path: /home/ubuntu
+        state: present
+    - name: Inicia el contenedor a partir de la imagen
+      community.docker.docker_container:
+        name: zimbrabuild
+        state: started
+        image: zimbrabuild
+        command: sleep infinity 
+    - name: Almacena el directorio donde se genero el artefacto en la variable foo_result
+      shell: "docker exec zimbrabuild ls -l /home/build/BUILDS | grep UBUN | awk '{print $9}'"
+      register: foo_result
+    - debug:
+        msg: "{{ foo_result.stdout }}"
+    - name: Almacena almacena el nombre del artefacto en la variable foo_result1
+      shell: "docker exec zimbrabuild ls -l /home/build/BUILDS/{{ foo_result.stdout }} | grep .tgz | awk '{print $9}'"
+      register: foo_result1
+    - debug:
+        msg: "{{ foo_result1.stdout }}"                  
+    - name: Copia el artefacto desde el docker a la instancia de compilacion
+      command: "{{ item }} chdir=/home/ubuntu"
+      with_items:
+        - docker cp zimbrabuild:/home/build/BUILDS/{{ foo_result.stdout }}/{{ foo_result1.stdout }} /home/ubuntu/               
